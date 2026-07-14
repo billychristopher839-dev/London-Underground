@@ -697,6 +697,8 @@ table.points tr.neg td{background:#f8f7f4}
         <button class="btn" id="obStart">🚇 Start building →</button>
         <button class="btn ghost" id="obSkip">Skip setup</button>
       </div>
+
+      <div id="obSyncArea" style="margin-top:18px"></div>
     </div>
   </div>
 </div>
@@ -1234,9 +1236,29 @@ function openOnboarding(){
   $('#obGoal').value='';
   $('#obTemplate').value=firstKey;
   obTags=[...TEMPLATES[firstKey].tags];
-  if($('#obGoal').placeholder && TEMPLATES[firstKey].goal) {/* keep placeholder */}
   renderObTags();
+  renderObSync();
   $('#setupOverlay').classList.add('show');
+}
+function onboardingOpen(){ const o=$('#setupOverlay'); return o && o.classList.contains('show'); }
+function renderObSync(){
+  const area=$('#obSyncArea'); if(!area) return;
+  const cfg=getFirebaseConfig();
+  if(!cfg){
+    area.innerHTML='<div class="hr" style="margin:14px 0"></div><p class="muted">Already using this on another device? Once <b>cloud sync</b> is set up (Sync tab), you can sign in to restore your setup, progress and network on any device.</p>';
+    return;
+  }
+  let inner='<div class="hr" style="margin:14px 0"></div>'+
+    '<p class="muted" style="margin-bottom:10px"><b>Already have progress on another device?</b> Sign in to restore your setup, logbook and network automatically.</p>';
+  if(SYNC.busy){
+    inner+='<div class="sync-card"><span class="sync-dot busy"></span><div><div class="st-main">Restoring…</div><div class="st-sub">Pulling your network from the cloud.</div></div></div>';
+  } else {
+    inner+='<button class="gbtn" id="obGoogle">'+G_SVG+'Sign in with Google to restore</button>';
+    if(SYNC.err) inner+='<p class="st-sub" style="color:var(--warn);margin-top:8px">'+escapeHtml(SYNC.err)+'</p>';
+    if(isLocalContext()) inner+='<p class="videonote" style="margin-top:8px">\u26a0 Google sign-in needs the game hosted over https (e.g. GitHub Pages), not a local file.</p>';
+  }
+  area.innerHTML=inner;
+  const g=$('#obGoogle'); if(g) g.onclick=signInGoogle;
 }
 function applyOnboarding(skip){
   if(!skip){
@@ -1424,8 +1446,14 @@ function migrate(p){
 // Option A: bake your config in here, then redeploy.
 // Option B: leave blank and paste it in the Sync tab instead.
 const FIREBASE_CONFIG = {
-  apiKey: "", authDomain: "", databaseURL: "", projectId: "",
-  storageBucket: "", messagingSenderId: "", appId: ""
+  apiKey: "AIzaSyDI4sjEJwXij9MVFSP8uweO4i9wRiB_qyo",
+  authDomain: "underground-36f46.firebaseapp.com",
+  databaseURL: "https://underground-36f46-default-rtdb.firebaseio.com",
+  projectId: "underground-36f46",
+  storageBucket: "underground-36f46.firebasestorage.app",
+  messagingSenderId: "674426995507",
+  appId: "1:674426995507:web:d7c34307e9061954cdb446",
+  measurementId: "G-C78BEL9SQ6"
 };
 
 const SYNC = { uid:null, email:null, ref:null, ready:false, busy:false, lastCore:null, lastSync:0, deb:null, err:null };
@@ -1505,11 +1533,20 @@ function onAuth(user){
     try{ localStorage.setItem('lu_sync_auto','1'); }catch(e){}
     SYNC.busy=true; SYNC.err=null; renderSync();
     SYNC.ref.once('value').then(snap=>{
+      const hadRemote = !!snap.val();
       applyRemote(snap.val(), true);
       SYNC.ref.on('value', s=>applyRemote(s.val(), false));
       SYNC.ready=true; SYNC.busy=false; renderSync();
-      toast('Synced as '+SYNC.email);
-    }).catch(e=>{ SYNC.busy=false; SYNC.err='Sync connect failed: '+(e.code||e.message); renderSync(); });
+      // If we were on the onboarding gate and real progress came down, close it.
+      if(onboardingOpen() && (S.onboarded || hadRemote)){
+        S.onboarded=true; save();
+        $('#setupOverlay').classList.remove('show');
+        switchTab('progress'); render(); renderEntryRows();
+        toast('Welcome back — your network is restored.');
+      } else {
+        toast('Synced as '+SYNC.email);
+      }
+    }).catch(e=>{ SYNC.busy=false; SYNC.err='Sync connect failed: '+(e.code||e.message); renderSync(); renderObSync(); });
   } else {
     SYNC.uid=null; SYNC.email=null; SYNC.ref=null; SYNC.ready=false; renderSync();
   }
@@ -1588,6 +1625,7 @@ function renderSync(){
   if(note) note.innerHTML = isLocalContext()
     ? '\u26a0 You\u2019re running this as a local file. Google sign-in popups are blocked by Firebase for local files \u2014 sync works once the game is hosted (e.g. on GitHub Pages over https).'
     : '';
+  if(onboardingOpen()) renderObSync();
 }
 
 async function boot(){
